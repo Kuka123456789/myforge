@@ -5,8 +5,12 @@
 // (or a new "Desktop app" client), under "OAuth consent screen" add these scopes:
 //   - https://www.googleapis.com/auth/gmail.readonly
 //   - https://www.googleapis.com/auth/spreadsheets
-//   - https://www.googleapis.com/auth/drive.file
+//   - https://www.googleapis.com/auth/drive       (full Drive — browse any folder, not just app-created files)
+//   - https://www.googleapis.com/auth/documents   (Google Docs read/write)
 // And confirm http://localhost:53682/oauth is registered as a redirect URI (Desktop clients accept localhost).
+//
+// If you previously bootstrapped with drive.file, you MUST re-run this and replace both
+// GOOGLE_REFRESH_TOKEN and GOOGLE_REFRESH_TOKEN_PERSONAL — the old tokens won't have drive scope.
 //
 // Then run:
 //   GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... node scripts/bootstrap-google-oauth.mjs
@@ -28,7 +32,8 @@ const REDIRECT_URI = `http://localhost:${PORT}/oauth`;
 const SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/spreadsheets',
-  'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/documents',
 ];
 
 const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');

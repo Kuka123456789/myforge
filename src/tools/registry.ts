@@ -2,12 +2,12 @@ import type { Env } from '../index';
 import type { MemoryType } from '../memory';
 import type { ToolDefinition } from '../types';
 import { calendarCreateEvent, calendarDeleteEvent, calendarListEvents } from './calendar';
-import { driveUploadInvoice } from './drive';
+import { docCreate, driveCreateFolder, driveGetFile, driveList, driveUploadInvoice } from './drive';
 import { githubCodeSearch, githubFileGet, githubIssueSearch, githubRepoStats } from './github';
 import { gmailRead, gmailSearch, gmailSearchBoth } from './gmail';
 import { memoryBulkSave, memoryDelete, memorySave, memoryView } from './memory';
 import { reminderCancel, reminderList, reminderSet } from './reminders';
-import { sheetsAppendExpense, sheetsRead } from './sheets';
+import { sheetsAddTab, sheetsAppendExpense, sheetsCreate, sheetsRead, sheetsWrite } from './sheets';
 
 export interface ToolContext {
   env: Env;
@@ -107,6 +107,111 @@ const TOOLS: ToolDefinition[] = [
         folder_id: { type: 'string', description: 'Drive folder ID; required for personal account' },
       },
       required: ['file_id'],
+    },
+  },
+  {
+    name: 'drive_list',
+    description:
+      "Browse Drive. Pass folder_id to list a folder's contents, or query to name-search. Omit both for root. Returns folders + files with id/name/kind/link. Use the id as folder_id to drill in, or as file_id for drive_get_file.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        folder_id: { type: 'string', description: 'Drive folder id; omit to list root' },
+        query: { type: 'string', description: 'Free-text name substring' },
+        max_results: { type: 'integer', default: 25 },
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+        include_shared_drives: { type: 'boolean', default: false },
+      },
+    },
+  },
+  {
+    name: 'drive_create_folder',
+    description: 'Create a folder. Pass parent_id to nest, omit for My Drive root.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        parent_id: { type: 'string' },
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'drive_get_file',
+    description:
+      "Get a Drive file's metadata. include_content:true also pulls text (Docs → plain text, Sheets → CSV, text/* → raw), capped at 12k chars. For binary files, use the link.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        file_id: { type: 'string' },
+        include_content: { type: 'boolean', default: false },
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+      },
+      required: ['file_id'],
+    },
+  },
+  {
+    name: 'sheets_create',
+    description:
+      "Create a new Google Sheet. Optionally pass tabs (array of tab names) and parent_folder_id to place it in a specific Drive folder. Returns sheet_id for sheets_write/sheets_read.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        tabs: { type: 'array', items: { type: 'string' }, description: 'Tab names; defaults to ["Sheet1"]' },
+        parent_folder_id: { type: 'string' },
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'sheets_write',
+    description:
+      "Write a block of values to a sheet range. OVERWRITES existing cells (use sheets_append_expense for the canonical expense log). values is a 2D array of rows. range defaults to A1.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        sheet_id: { type: 'string' },
+        tab: { type: 'string' },
+        range: { type: 'string', description: "A1 within the tab e.g. 'A1:D10'; defaults to A1" },
+        values: {
+          type: 'array',
+          description: '2D array of row values (string/number/boolean)',
+          items: { type: 'array', items: {} },
+        },
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+      },
+      required: ['sheet_id', 'tab', 'values'],
+    },
+  },
+  {
+    name: 'sheets_add_tab',
+    description: 'Add a tab (sheet) to an existing spreadsheet.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        sheet_id: { type: 'string' },
+        title: { type: 'string', description: 'Tab name' },
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+      },
+      required: ['sheet_id', 'title'],
+    },
+  },
+  {
+    name: 'doc_create',
+    description:
+      "Create a Google Doc. body is plain text or simple markdown (becomes the doc content). Pass parent_folder_id to place it.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        body: { type: 'string', description: 'Initial body text' },
+        parent_folder_id: { type: 'string' },
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+      },
+      required: ['title'],
     },
   },
   {
@@ -336,6 +441,20 @@ export async function dispatchTool(
       return sheetsRead(ctx.env, input as Parameters<typeof sheetsRead>[1]);
     case 'drive_upload_invoice':
       return driveUploadInvoice(ctx.env, input as Parameters<typeof driveUploadInvoice>[1]);
+    case 'drive_list':
+      return driveList(ctx.env, input as Parameters<typeof driveList>[1]);
+    case 'drive_create_folder':
+      return driveCreateFolder(ctx.env, input as Parameters<typeof driveCreateFolder>[1]);
+    case 'drive_get_file':
+      return driveGetFile(ctx.env, input as Parameters<typeof driveGetFile>[1]);
+    case 'sheets_create':
+      return sheetsCreate(ctx.env, input as Parameters<typeof sheetsCreate>[1]);
+    case 'sheets_write':
+      return sheetsWrite(ctx.env, input as Parameters<typeof sheetsWrite>[1]);
+    case 'sheets_add_tab':
+      return sheetsAddTab(ctx.env, input as Parameters<typeof sheetsAddTab>[1]);
+    case 'doc_create':
+      return docCreate(ctx.env, input as Parameters<typeof docCreate>[1]);
     case 'github_code_search':
       return githubCodeSearch(ctx.env, input as Parameters<typeof githubCodeSearch>[1]);
     case 'github_file_get':

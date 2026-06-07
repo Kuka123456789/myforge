@@ -76,3 +76,114 @@ export async function sheetsRead(env: Env, input: ReadInput): Promise<unknown> {
   if (!res.ok) throw new Error(`Sheets read (${account}) failed: ${res.status} ${await res.text()}`);
   return res.json();
 }
+
+interface CreateInput {
+  title: string;
+  tabs?: string[]; // tab names (defaults to ['Sheet1'])
+  parent_folder_id?: string;
+  account?: GoogleAccount;
+}
+
+export async function sheetsCreate(env: Env, input: CreateInput): Promise<unknown> {
+  const account = input.account ?? 'work';
+  const tabs = input.tabs && input.tabs.length > 0 ? input.tabs : ['Sheet1'];
+
+  const body = {
+    properties: { title: input.title },
+    sheets: tabs.map((name) => ({ properties: { title: name } })),
+  };
+  const res = await googleFetch(
+    env,
+    'https://sheets.googleapis.com/v4/spreadsheets?fields=spreadsheetId,spreadsheetUrl,properties.title,sheets.properties.title',
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+    account,
+  );
+  if (!res.ok) throw new Error(`Sheets create (${account}) failed: ${res.status} ${await res.text()}`);
+  const data = (await res.json()) as {
+    spreadsheetId: string;
+    spreadsheetUrl: string;
+    properties: { title: string };
+    sheets: Array<{ properties: { title: string } }>;
+  };
+
+  // If a parent folder was specified, move the new file there via Drive.
+  if (input.parent_folder_id) {
+    const moveRes = await googleFetch(
+      env,
+      `https://www.googleapis.com/drive/v3/files/${data.spreadsheetId}?addParents=${input.parent_folder_id}&removeParents=root&supportsAllDrives=true&fields=id,parents`,
+      { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{}' },
+      account,
+    );
+    if (!moveRes.ok) {
+      console.log(`[sheets_create] warn: created but couldn't move to folder: ${moveRes.status}`);
+    }
+  }
+
+  return {
+    ok: true,
+    account,
+    sheet_id: data.spreadsheetId,
+    title: data.properties.title,
+    tabs: data.sheets.map((s) => s.properties.title),
+    link: data.spreadsheetUrl,
+  };
+}
+
+interface WriteInput {
+  sheet_id: string;
+  tab: string;
+  range?: string; // A1 notation within the tab; default A1
+  values: (string | number | boolean | null)[][]; // 2D row-major
+  account?: GoogleAccount;
+}
+
+export async function sheetsWrite(env: Env, input: WriteInput): Promise<unknown> {
+  const account = input.account ?? 'work';
+  const range = input.range ? `${input.tab}!${input.range}` : `${input.tab}!A1`;
+  const url = new URL(
+    `https://sheets.googleapis.com/v4/spreadsheets/${input.sheet_id}/values/${encodeURIComponent(range)}`,
+  );
+  url.searchParams.set('valueInputOption', 'USER_ENTERED');
+
+  const res = await googleFetch(
+    env,
+    url.toString(),
+    { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ values: input.values }) },
+    account,
+  );
+  if (!res.ok) throw new Error(`Sheets write (${account}) failed: ${res.status} ${await res.text()}`);
+  const data = (await res.json()) as { updatedRange?: string; updatedCells?: number };
+  return {
+    ok: true,
+    account,
+    sheet_id: input.sheet_id,
+    updated_range: data.updatedRange,
+    updated_cells: data.updatedCells,
+    link: `https://docs.google.com/spreadsheets/d/${input.sheet_id}/edit`,
+  };
+}
+
+interface AddTabInput {
+  sheet_id: string;
+  title: string;
+  account?: GoogleAccount;
+}
+
+export async function sheetsAddTab(env: Env, input: AddTabInput): Promise<unknown> {
+  const account = input.account ?? 'work';
+  const body = { requests: [{ addSheet: { properties: { title: input.title } } }] };
+  const res = await googleFetch(
+    env,
+    `https://sheets.googleapis.com/v4/spreadsheets/${input.sheet_id}:batchUpdate`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+    account,
+  );
+  if (!res.ok) throw new Error(`Sheets add tab (${account}) failed: ${res.status} ${await res.text()}`);
+  return {
+    ok: true,
+    account,
+    sheet_id: input.sheet_id,
+    tab: input.title,
+    link: `https://docs.google.com/spreadsheets/d/${input.sheet_id}/edit`,
+  };
+}
