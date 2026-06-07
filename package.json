@@ -2,7 +2,7 @@
   "name": "myforge",
   "version": "0.1.0",
   "private": true,
-  "description": "MyForge — Daniel's personal AI assistant on Telegram. Cloudflare Worker + Claude API + Gmail/Sheets/Drive/GitHub tools.",
+  "description": "MyForge: a personal AI assistant on Telegram. Cloudflare Worker + Claude API + Gmail/Sheets/Drive/GitHub tools.",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
