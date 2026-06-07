@@ -27,6 +27,21 @@ function refreshTokenFor(env: Env, account: GoogleAccount): string {
   return env.GOOGLE_REFRESH_TOKEN;
 }
 
+// Per-account OAuth client. The work account uses a client with full Drive
+// scope; the personal account uses a separate (limited) OAuth client because
+// Google blocks Drive (restricted) on consumer Gmail without paid app
+// verification. Falls back to GOOGLE_CLIENT_ID/SECRET if the per-account
+// variant isn't set.
+function clientFor(env: Env, account: GoogleAccount): { id: string; secret: string } {
+  if (account === 'personal') {
+    return {
+      id: env.GOOGLE_CLIENT_ID_PERSONAL || env.GOOGLE_CLIENT_ID,
+      secret: env.GOOGLE_CLIENT_SECRET_PERSONAL || env.GOOGLE_CLIENT_SECRET,
+    };
+  }
+  return { id: env.GOOGLE_CLIENT_ID, secret: env.GOOGLE_CLIENT_SECRET };
+}
+
 export async function getGoogleAccessToken(
   env: Env,
   account: GoogleAccount = 'work',
@@ -41,12 +56,13 @@ export async function getGoogleAccessToken(
     return cached.accessToken;
   }
 
+  const client = clientFor(env, account);
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      client_id: env.GOOGLE_CLIENT_ID,
-      client_secret: env.GOOGLE_CLIENT_SECRET,
+      client_id: client.id,
+      client_secret: client.secret,
       refresh_token: refreshTokenFor(env, account),
       grant_type: 'refresh_token',
     }),

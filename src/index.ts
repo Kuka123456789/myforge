@@ -41,6 +41,8 @@ export interface Env {
   ANTHROPIC_API_KEY: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
+  GOOGLE_CLIENT_ID_PERSONAL?: string;
+  GOOGLE_CLIENT_SECRET_PERSONAL?: string;
   GOOGLE_REFRESH_TOKEN: string;
   GOOGLE_REFRESH_TOKEN_PERSONAL: string;
   GITHUB_TOKEN: string;

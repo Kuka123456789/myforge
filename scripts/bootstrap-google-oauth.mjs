@@ -29,12 +29,23 @@ if (!clientId || !clientSecret) {
 
 const PORT = 53682;
 const REDIRECT_URI = `http://localhost:${PORT}/oauth`;
-const SCOPES = [
+
+// Scope sets. Default = work (full power, restricted-scope; only works for the
+// Workspace-internal work account). MINIMAL=1 = personal (gmail + calendar only,
+// no Drive, no Sheets — avoids Google's restricted-scope wall on consumer Gmail).
+const FULL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/drive',
   'https://www.googleapis.com/auth/documents',
+  'https://www.googleapis.com/auth/calendar.events',
 ];
+const MINIMAL_SCOPES = [
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/calendar.events',
+];
+const SCOPES = process.env.MINIMAL === '1' ? MINIMAL_SCOPES : FULL_SCOPES;
+console.log(`Requesting scopes: ${SCOPES.join(', ')}`);
 
 const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
 authUrl.searchParams.set('client_id', clientId);
