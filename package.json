@@ -1,0 +1,18 @@
+{
+  "name": "myforge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MyForge — Daniel's personal AI assistant on Telegram. Cloudflare Worker + Claude API + Gmail/Sheets/Drive/GitHub tools.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "set-webhook": "node scripts/set-webhook.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260601.0",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.0.0"
+  }
+}

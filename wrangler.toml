@@ -1,0 +1,54 @@
+name = "myforge"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+workers_dev = true
+
+# 7-day log retention on Workers Paid — lets us look at past errors after the fact
+# instead of needing to be tail'ing live.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[[kv_namespaces]]
+binding = "STATE"
+id = "cb0ea8ef2cbb480fbc5bf89e3feb612b"
+
+# Workers AI binding — used for Whisper voice transcription. No extra API key required.
+[ai]
+binding = "AI"
+
+# Workers Paid allows up to 5min CPU per invocation. The real lever for long
+# work is Queues (see below), which let consumers run for up to 15 minutes.
+[limits]
+cpu_ms = 300000
+
+# Queue: webhook fires-and-forgets onto here; consumer below does the slow work
+# (Claude + tool calls) with no waitUntil time pressure.
+[[queues.producers]]
+binding = "MESSAGES"
+queue = "myforge-messages"
+
+[[queues.consumers]]
+queue = "myforge-messages"
+max_batch_size = 1       # process one message at a time
+max_batch_timeout = 1    # don't wait to batch
+max_concurrency = 4      # allow concurrent processing of different messages
+max_retries = 0          # don't retry on errors; surface them to the operator
+
+# Cron trigger — runs the scheduled() handler every minute to fire due reminders.
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+CLAUDE_MODEL = "claude-sonnet-4-6"
+MAX_TURNS = "10"
+HISTORY_LIMIT = "12"
+
+# Secrets (set with `npx wrangler secret put <NAME>`):
+#   TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_CHAT_ID, ANTHROPIC_API_KEY,
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN,
+#   GITHUB_TOKEN, GITHUB_DEFAULT_REPO,
+#   EXPENSES_SHEET_ID, EXPENSES_IT_TAB, EXPENSES_TRAVEL_TAB,
+#   INVOICES_DRIVE_FOLDER_ID

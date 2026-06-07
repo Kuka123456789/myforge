@@ -1,0 +1,36 @@
+# Copy to .dev.vars for local `wrangler dev`. Real secrets go via `wrangler secret put` for production.
+
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ALLOWED_CHAT_ID=
+ANTHROPIC_API_KEY=
+
+# Google OAuth: one client + secret covers both accounts; mint a refresh token per account.
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REFRESH_TOKEN=
+GOOGLE_REFRESH_TOKEN_PERSONAL=
+
+GITHUB_TOKEN=
+# Default repo for github_* tools, e.g. "owner/repo".
+GITHUB_DEFAULT_REPO=
+
+# Expense logging (work-only) — point at your own Google Sheet + tabs.
+EXPENSES_SHEET_ID=
+EXPENSES_IT_TAB=
+EXPENSES_TRAVEL_TAB=
+
+# Drive folder ID where invoice PDFs/photos get uploaded.
+INVOICES_DRIVE_FOLDER_ID=
+
+# IANA timezone, e.g. "Europe/London", "America/New_York". Used to display
+# reminders and as the default for calendar events. Defaults to UTC if empty.
+OPERATOR_TIMEZONE=
+
+# Multi-line operator profile injected into the system prompt. Goes here in
+# dev (single-line escape with \n) and via `wrangler secret put OWNER_CONTEXT`
+# in prod. Tell Claude who the operator is, account-routing rules, paid_by
+# values for sheets_append_expense, default repo context, etc. See README.
+OWNER_CONTEXT=
+
+# Random hex used by the /test endpoint. Generate with: openssl rand -hex 16
+TEST_SECRET=
