@@ -112,7 +112,7 @@ const TOOLS: ToolDefinition[] = [
   {
     name: 'drive_list',
     description:
-      "Browse Drive. Pass folder_id to list a folder's contents, or query to name-search. Omit both for root. Returns folders + files with id/name/kind/link. Use the id as folder_id to drill in, or as file_id for drive_get_file.",
+      "Browse Drive (Shared Drives included). Pass folder_id to list a folder's contents, or query to name-search. Omit both for root. Returns folders + files with id/name/kind/link. Use the id as folder_id to drill in, or as file_id for drive_get_file.",
     input_schema: {
       type: 'object',
       properties: {
@@ -120,7 +120,6 @@ const TOOLS: ToolDefinition[] = [
         query: { type: 'string', description: 'Free-text name substring' },
         max_results: { type: 'integer', default: 25 },
         account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
-        include_shared_drives: { type: 'boolean', default: false },
       },
     },
   },

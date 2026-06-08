@@ -11,7 +11,6 @@ interface DriveListInput {
   query?: string; // free-text name match; combined with folder constraint
   max_results?: number;
   account?: GoogleAccount;
-  include_shared_drives?: boolean;
 }
 
 export async function driveList(env: Env, input: DriveListInput): Promise<unknown> {
@@ -22,15 +21,16 @@ export async function driveList(env: Env, input: DriveListInput): Promise<unknow
   if (input.folder_id) qParts.push(`'${input.folder_id.replace(/'/g, "\\'")}' in parents`);
   if (input.query) qParts.push(`name contains '${input.query.replace(/'/g, "\\'")}'`);
 
+  // Always include Shared Drive content. Without these flags the API silently
+  // returns 0 results for folders that live on a Shared Drive — looks like
+  // "empty folder" but is actually a missing capability flag.
   const url = new URL('https://www.googleapis.com/drive/v3/files');
   url.searchParams.set('q', qParts.join(' and '));
   url.searchParams.set('pageSize', String(max));
   url.searchParams.set('fields', 'files(id,name,mimeType,parents,modifiedTime,webViewLink,owners(emailAddress)),nextPageToken');
   url.searchParams.set('orderBy', 'folder,modifiedTime desc');
-  if (input.include_shared_drives) {
-    url.searchParams.set('supportsAllDrives', 'true');
-    url.searchParams.set('includeItemsFromAllDrives', 'true');
-  }
+  url.searchParams.set('supportsAllDrives', 'true');
+  url.searchParams.set('includeItemsFromAllDrives', 'true');
 
   const res = await googleFetch(env, url.toString(), {}, account);
   if (!res.ok) throw new Error(`Drive list (${account}) failed: ${res.status} ${await res.text()}`);
