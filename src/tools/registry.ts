@@ -436,39 +436,39 @@ export async function dispatchTool(
         (input.account as 'work' | 'personal') ?? 'work',
       );
     case 'sheets_append_expense':
-      return sheetsAppendExpense(ctx.env, input as Parameters<typeof sheetsAppendExpense>[1]);
+      return sheetsAppendExpense(ctx.env, input as unknown as Parameters<typeof sheetsAppendExpense>[1]);
     case 'sheets_read':
-      return sheetsRead(ctx.env, input as Parameters<typeof sheetsRead>[1]);
+      return sheetsRead(ctx.env, input as unknown as Parameters<typeof sheetsRead>[1]);
     case 'drive_upload_invoice':
-      return driveUploadInvoice(ctx.env, input as Parameters<typeof driveUploadInvoice>[1]);
+      return driveUploadInvoice(ctx.env, input as unknown as Parameters<typeof driveUploadInvoice>[1]);
     case 'drive_list':
       return driveList(ctx.env, input as Parameters<typeof driveList>[1]);
     case 'drive_create_folder':
-      return driveCreateFolder(ctx.env, input as Parameters<typeof driveCreateFolder>[1]);
+      return driveCreateFolder(ctx.env, input as unknown as Parameters<typeof driveCreateFolder>[1]);
     case 'drive_get_file':
-      return driveGetFile(ctx.env, input as Parameters<typeof driveGetFile>[1]);
+      return driveGetFile(ctx.env, input as unknown as Parameters<typeof driveGetFile>[1]);
     case 'sheets_create':
-      return sheetsCreate(ctx.env, input as Parameters<typeof sheetsCreate>[1]);
+      return sheetsCreate(ctx.env, input as unknown as Parameters<typeof sheetsCreate>[1]);
     case 'sheets_write':
-      return sheetsWrite(ctx.env, input as Parameters<typeof sheetsWrite>[1]);
+      return sheetsWrite(ctx.env, input as unknown as Parameters<typeof sheetsWrite>[1]);
     case 'sheets_add_tab':
-      return sheetsAddTab(ctx.env, input as Parameters<typeof sheetsAddTab>[1]);
+      return sheetsAddTab(ctx.env, input as unknown as Parameters<typeof sheetsAddTab>[1]);
     case 'doc_create':
-      return docCreate(ctx.env, input as Parameters<typeof docCreate>[1]);
+      return docCreate(ctx.env, input as unknown as Parameters<typeof docCreate>[1]);
     case 'github_code_search':
-      return githubCodeSearch(ctx.env, input as Parameters<typeof githubCodeSearch>[1]);
+      return githubCodeSearch(ctx.env, input as unknown as Parameters<typeof githubCodeSearch>[1]);
     case 'github_file_get':
-      return githubFileGet(ctx.env, input as Parameters<typeof githubFileGet>[1]);
+      return githubFileGet(ctx.env, input as unknown as Parameters<typeof githubFileGet>[1]);
     case 'github_repo_stats':
       return githubRepoStats(ctx.env, input as Parameters<typeof githubRepoStats>[1]);
     case 'github_issue_search':
-      return githubIssueSearch(ctx.env, input as Parameters<typeof githubIssueSearch>[1]);
+      return githubIssueSearch(ctx.env, input as unknown as Parameters<typeof githubIssueSearch>[1]);
     case 'calendar_list_events':
       return calendarListEvents(ctx.env, input as Parameters<typeof calendarListEvents>[1]);
     case 'calendar_create_event':
-      return calendarCreateEvent(ctx.env, input as Parameters<typeof calendarCreateEvent>[1]);
+      return calendarCreateEvent(ctx.env, input as unknown as Parameters<typeof calendarCreateEvent>[1]);
     case 'calendar_delete_event':
-      return calendarDeleteEvent(ctx.env, input as Parameters<typeof calendarDeleteEvent>[1]);
+      return calendarDeleteEvent(ctx.env, input as unknown as Parameters<typeof calendarDeleteEvent>[1]);
     case 'reminder_set':
       return reminderSet(ctx.env, {
         when_iso: String(input.when_iso),

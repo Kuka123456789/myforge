@@ -124,13 +124,13 @@ export default {
     }
   },
 
-  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
     const result = await fireDueReminders(env.STATE, env.TELEGRAM_BOT_TOKEN);
     if (result.fired > 0) {
       console.log(`fired ${result.fired} reminder(s), ${result.remaining} pending`);
     }
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<Env, TelegramUpdate>;
 
 async function handleMessage(msg: TelegramMessage, env: Env): Promise<void> {
   const rawText = msg.text ?? msg.caption ?? '';
@@ -282,7 +282,7 @@ async function handleSystemCommand(sub: string, msg: TelegramMessage, env: Env):
   const chatId = msg.chat.id;
 
   // Parse: "<verb> <rest>" or just "<verb>".
-  const [verb, ...rest] = sub.split(/\s+/);
+  const [verb] = sub.split(/\s+/);
   const argText = sub.slice(verb.length).trim();
 
   if (!verb) {

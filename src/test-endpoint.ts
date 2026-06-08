@@ -11,13 +11,6 @@ import { runAgent } from './claude';
 import { loadIndex, renderIndexAsContext } from './memory';
 import type { ClaudeContentBlock, ClaudeMessage } from './types';
 
-interface ToolCallRecord {
-  name: string;
-  input: unknown;
-  result_preview: string;
-  error?: string;
-}
-
 export async function handleTestRequest(req: Request, env: Env): Promise<Response> {
   const provided = req.headers.get('x-test-secret');
   if (!env.TEST_SECRET || provided !== env.TEST_SECRET) {
