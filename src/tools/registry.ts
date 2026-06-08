@@ -352,7 +352,7 @@ const TOOLS: ToolDefinition[] = [
   {
     name: 'memory_save',
     description:
-      "Save/update a memory. Same name updates. Kebab-case name. Description is one line for the index.",
+      "Save/update a memory. Same name updates. Kebab-case name. Description is one line for the index. High bar: only save if it will change a future reply, isn't already in the index (update the existing entry if it overlaps — don't create near-duplicates or 'extended-X' variants), is durable (not a one-off event), and came from the operator's own words. Default is don't save.",
     input_schema: {
       type: 'object',
       properties: {
