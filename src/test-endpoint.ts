@@ -23,13 +23,23 @@ export async function handleTestRequest(req: Request, env: Env): Promise<Respons
   // call) for both refresh-token secrets, in parallel. Use to confirm the
   // refresh token in env actually maps to the right Google account.
   if (url.searchParams.get('oauth') === '1') {
-    const probe = async (label: string, refreshToken: string) => {
+    // Per-account OAuth clients: personal uses its own client_id/secret because
+    // Google blocks Drive scope on consumer Gmail. Match what google-auth.ts does.
+    const clientFor = (acct: 'work' | 'personal') =>
+      acct === 'personal'
+        ? {
+            id: env.GOOGLE_CLIENT_ID_PERSONAL || env.GOOGLE_CLIENT_ID,
+            secret: env.GOOGLE_CLIENT_SECRET_PERSONAL || env.GOOGLE_CLIENT_SECRET,
+          }
+        : { id: env.GOOGLE_CLIENT_ID, secret: env.GOOGLE_CLIENT_SECRET };
+    const probe = async (label: 'work' | 'personal', refreshToken: string) => {
+      const { id, secret } = clientFor(label);
       const res = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
-          client_id: env.GOOGLE_CLIENT_ID,
-          client_secret: env.GOOGLE_CLIENT_SECRET,
+          client_id: id,
+          client_secret: secret,
           refresh_token: refreshToken,
           grant_type: 'refresh_token',
         }),
