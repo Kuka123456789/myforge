@@ -16,6 +16,8 @@ interface RunArgs {
   messages: ClaudeMessage[];
   maxTurns: number;
   chat_id: number;
+  /** Memory index block to append to the cached system prompt. */
+  memoryBlock?: string;
   /** Called between turns with a one-line status. Fire-and-forget. */
   onProgress?: (text: string) => void;
 }
@@ -33,11 +35,15 @@ interface ClaudeResponse {
 }
 
 export async function runAgent(args: RunArgs): Promise<RunResult> {
-  const { env, maxTurns, chat_id, onProgress } = args;
+  const { env, maxTurns, chat_id, onProgress, memoryBlock } = args;
   const messages: ClaudeMessage[] = [...args.messages];
   const tools = getToolDefinitions();
   const toolCtx: ToolContext = { env, chat_id };
-  const systemPrompt = await getEffectivePrompt(env.STATE, env.OWNER_CONTEXT);
+  const basePrompt = await getEffectivePrompt(env.STATE, env.OWNER_CONTEXT);
+  // Memory index lives in the cached system block so it's read at $0.30/MTok
+  // instead of $3/MTok per turn. It only invalidates the cache when memories
+  // are saved or deleted, which is rare under the strict save bar.
+  const systemPrompt = memoryBlock ? `${basePrompt}\n\n${memoryBlock}` : basePrompt;
   let lastAssistant: ClaudeContentBlock[] = [];
 
   for (let turn = 0; turn < maxTurns; turn++) {

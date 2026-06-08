@@ -153,13 +153,13 @@ async function handleMessage(msg: TelegramMessage, env: Env): Promise<void> {
     return;
   }
 
-  // Prepend memory index + today's date so Claude has both before user content.
+  // <today> rides in the user message (cheap, changes daily, doesn't bust cache).
+  // Memory index goes into the system prompt via runAgent so it's cached.
   const memoryIndex = await loadIndex(env.STATE);
   const memoryBlock = renderIndexAsContext(memoryIndex);
   const today = new Date().toISOString().slice(0, 10);
-  const preface = [`<today>${today}</today>`, memoryBlock].filter(Boolean).join('\n\n');
   const enrichedContent: ClaudeContentBlock[] = [
-    { type: 'text', text: preface },
+    { type: 'text', text: `<today>${today}</today>` },
     ...userContent,
   ];
 
@@ -177,6 +177,7 @@ async function handleMessage(msg: TelegramMessage, env: Env): Promise<void> {
       messages,
       maxTurns: parseInt(env.MAX_TURNS, 10) || 10,
       chat_id: msg.chat.id,
+      memoryBlock,
       // Stage progress: send a one-line update to Telegram each time Claude
       // calls tools. Fire-and-forget so it doesn't slow processing.
       onProgress: (text) => {

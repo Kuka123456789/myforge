@@ -128,9 +128,8 @@ export async function handleTestRequest(req: Request, env: Env): Promise<Respons
   const memoryIndex = await loadIndex(env.STATE);
   const memoryBlock = renderIndexAsContext(memoryIndex);
   const today = new Date().toISOString().slice(0, 10);
-  const preface = [`<today>${today}</today>`, memoryBlock].filter(Boolean).join('\n\n');
   const userContent: ClaudeContentBlock[] = [
-    { type: 'text', text: preface },
+    { type: 'text', text: `<today>${today}</today>` },
     { type: 'text', text: body.text },
   ];
   const messages: ClaudeMessage[] = [{ role: 'user', content: userContent }];
@@ -143,6 +142,7 @@ export async function handleTestRequest(req: Request, env: Env): Promise<Respons
       // Test mode uses a fake chat id; reminder_set would refuse on this anyway
       // because of past-date checks.
       chat_id: -1,
+      memoryBlock,
       onProgress: (text) => {
         stageMessages.push(text);
       },
