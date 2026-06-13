@@ -1,8 +1,10 @@
 import { runAgent } from './claude';
 import { loadIndex, renderIndexAsContext } from './memory';
 import { handleTestRequest } from './test-endpoint';
+import { beginAuthFlow, handleOAuthStart, handleOAuthCallback } from './tools/google-oauth-web';
 import { fireDueReminders, listReminders } from './reminders';
 import { clearHistory, loadHistory, saveHistory } from './state';
+import { appendTurns } from './transcripts';
 import {
   BASE_PROMPT,
   appendCustomRule,
@@ -27,6 +29,7 @@ interface WorkersAi {
 
 export interface Env {
   STATE: KVNamespace;
+  TRANSCRIPTS: R2Bucket;
   AI: WorkersAi;
   MESSAGES: Queue<TelegramUpdate>;
 
@@ -34,6 +37,7 @@ export interface Env {
   CLAUDE_MODEL: string;
   MAX_TURNS: string;
   HISTORY_LIMIT: string;
+  WORKER_ORIGIN: string;
 
   // Secrets
   TELEGRAM_BOT_TOKEN: string;
@@ -68,6 +72,14 @@ export default {
     // Developer test endpoint — drive the bot synchronously without Telegram.
     if (url.pathname === '/test' && req.method === 'POST') {
       return handleTestRequest(req, env);
+    }
+
+    // Google OAuth web flow — kicked off by `/auth` in Telegram, completes here.
+    if (url.pathname === '/oauth/start' && req.method === 'GET') {
+      return handleOAuthStart(req, env);
+    }
+    if (url.pathname === '/oauth/callback' && req.method === 'GET') {
+      return handleOAuthCallback(req, env);
     }
 
     if (req.method !== 'POST') return new Response('ok', { status: 200 });
@@ -191,8 +203,18 @@ async function handleMessage(msg: TelegramMessage, env: Env): Promise<void> {
     await sendMessage(env.TELEGRAM_BOT_TOKEN, msg.chat.id, result.reply, { replyTo: msg.message_id });
     console.log(`[handler] sendMessage ok to chat=${msg.chat.id}`);
 
-    const updated = [...messages, { role: 'assistant' as const, content: result.assistantBlocks }];
+    const userTurn: ClaudeMessage = { role: 'user', content: enrichedContent };
+    const assistantTurn: ClaudeMessage = { role: 'assistant', content: result.assistantBlocks };
+    const updated = [...messages, assistantTurn];
     await saveHistory(env.STATE, msg.chat.id, updated, parseInt(env.HISTORY_LIMIT, 10) || 12);
+    // Archive both turns to R2 for long-term searchable history. Must be
+    // awaited: Cloudflare cancels unawaited promises once the queue handler
+    // returns, so a fire-and-forget here was silently dropped.
+    try {
+      await appendTurns(env, msg.chat.id, [userTurn, assistantTurn]);
+    } catch (e) {
+      console.error('[handler] transcript append failed:', e);
+    }
   } finally {
     clearInterval(typingTimer);
   }
@@ -241,6 +263,26 @@ async function handleSlashCommand(text: string, msg: TelegramMessage, env: Env):
       const sub = text.slice(cmd.length).trim();
       return handleSystemCommand(sub, msg, env);
     }
+    case '/auth': {
+      const sub = text.slice(cmd.length).trim().toLowerCase();
+      const account: 'work' | 'personal' | null =
+        sub === 'work' ? 'work' : sub === 'personal' ? 'personal' : null;
+      if (!account) {
+        await sendMessage(
+          env.TELEGRAM_BOT_TOKEN,
+          msg.chat.id,
+          'Usage: /auth work  or  /auth personal\n\nGenerates a one-time sign-in link to re-link the Google account when its refresh token has expired.',
+        );
+        return true;
+      }
+      const link = await beginAuthFlow(env, env.WORKER_ORIGIN, account);
+      await sendMessage(
+        env.TELEGRAM_BOT_TOKEN,
+        msg.chat.id,
+        `Tap to re-link your ${account} Google account (valid for 10 minutes):\n\n${link}\n\nSign in with the ${account} Google account and approve the scopes. You'll see a confirmation page when it's done.`,
+      );
+      return true;
+    }
     case '/help':
     case '/start': {
       await sendMessage(
@@ -266,6 +308,7 @@ async function handleSlashCommand(text: string, msg: TelegramMessage, env: Env):
           '• /system add <rule> — append a rule to your custom prompt',
           '• /system set <text> — replace your custom prompt',
           '• /system clear — wipe custom additions, back to base',
+          '• /auth work | personal — re-link a Google account (when its login expires)',
           '• /help — this',
           '',
           'You can also send me voice notes — I transcribe and act on them.',

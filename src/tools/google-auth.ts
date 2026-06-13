@@ -17,12 +17,20 @@ interface CachedToken {
   expiresAt: number;
 }
 
-function refreshTokenFor(env: Env, account: GoogleAccount): string {
+// Refresh token resolution: KV (set by the /oauth web flow) wins over the
+// env secret bootstrapped on first install. That way a re-auth via `/auth`
+// in Telegram takes effect immediately, without `wrangler secret put`.
+async function refreshTokenFor(env: Env, account: GoogleAccount): Promise<string> {
+  const fromKv = await env.STATE.get(`google:refresh_token:${account}`);
+  if (fromKv) return fromKv;
   if (account === 'personal') {
     if (!env.GOOGLE_REFRESH_TOKEN_PERSONAL) {
-      throw new Error("Personal account isn't configured (GOOGLE_REFRESH_TOKEN_PERSONAL secret not set).");
+      throw new Error("Personal account isn't configured. Run /auth personal in Telegram.");
     }
     return env.GOOGLE_REFRESH_TOKEN_PERSONAL;
+  }
+  if (!env.GOOGLE_REFRESH_TOKEN) {
+    throw new Error("Work account isn't configured. Run /auth work in Telegram.");
   }
   return env.GOOGLE_REFRESH_TOKEN;
 }
@@ -63,7 +71,7 @@ export async function getGoogleAccessToken(
     body: new URLSearchParams({
       client_id: client.id,
       client_secret: client.secret,
-      refresh_token: refreshTokenFor(env, account),
+      refresh_token: await refreshTokenFor(env, account),
       grant_type: 'refresh_token',
     }),
   });
@@ -95,7 +103,7 @@ export async function googleFetch(
   const res = await fetch(url, { ...init, headers });
   if (res.status === 401) {
     throw new Error(
-      `Google API returned 401 for ${account} account — refresh token may be invalid or missing scopes. Re-run the OAuth bootstrap.`,
+      `Google API returned 401 for ${account} account — refresh token may be invalid or missing scopes. Send "/auth ${account}" to the bot to re-link.`,
     );
   }
   return res;

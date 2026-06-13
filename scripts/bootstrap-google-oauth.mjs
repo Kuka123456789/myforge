@@ -39,10 +39,16 @@ const FULL_SCOPES = [
   'https://www.googleapis.com/auth/drive',
   'https://www.googleapis.com/auth/documents',
   'https://www.googleapis.com/auth/calendar.events',
+  // Lets us call /users/me/calendarList to discover shared calendars
+  // (e.g. team members whose calendars are shared to your work account).
+  // calendar.events alone allows reading/writing events on a known calendar
+  // id, but cannot list the calendars in the first place.
+  'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
 ];
 const MINIMAL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
 ];
 const SCOPES = process.env.MINIMAL === '1' ? MINIMAL_SCOPES : FULL_SCOPES;
 console.log(`Requesting scopes: ${SCOPES.join(', ')}`);

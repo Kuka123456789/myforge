@@ -15,6 +15,13 @@ head_sampling_rate = 1
 binding = "STATE"
 id = "cb0ea8ef2cbb480fbc5bf89e3feb612b"
 
+# Long-term transcript archive — the KV history is capped at HISTORY_LIMIT turns,
+# this stores everything so the agent can search/replay older context.
+# Create once: `npx wrangler r2 bucket create myforge-transcripts`
+[[r2_buckets]]
+binding = "TRANSCRIPTS"
+bucket_name = "myforge-transcripts"
+
 # Workers AI binding — used for Whisper voice transcription. No extra API key required.
 [ai]
 binding = "AI"
@@ -43,8 +50,12 @@ crons = ["* * * * *"]
 
 [vars]
 CLAUDE_MODEL = "claude-sonnet-4-6"
-MAX_TURNS = "10"
+MAX_TURNS = "20"
 HISTORY_LIMIT = "12"
+# Public URL of this Worker — used to build OAuth redirect URIs sent to the
+# user via Telegram. Must match the Authorized redirect URI registered on
+# the Google OAuth client (Google Cloud Console → Credentials).
+WORKER_ORIGIN = "https://myforge.daniel-odesser.workers.dev"
 
 # Secrets (set with `npx wrangler secret put <NAME>`):
 #   TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_CHAT_ID, ANTHROPIC_API_KEY,

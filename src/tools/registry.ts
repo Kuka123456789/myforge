@@ -1,12 +1,24 @@
 import type { Env } from '../index';
 import type { MemoryType } from '../memory';
 import type { ToolDefinition } from '../types';
-import { calendarCreateEvent, calendarDeleteEvent, calendarListEvents } from './calendar';
-import { docCreate, driveCreateFolder, driveGetFile, driveList, driveUploadInvoice } from './drive';
+import { calendarCreateEvent, calendarDeleteEvent, calendarListCalendars, calendarListEvents } from './calendar';
+import { docAppend, docFindReplace, docReplaceBody } from './docs';
+import {
+  docCreate,
+  driveCreateFolder,
+  driveGetFile,
+  driveList,
+  driveMove,
+  driveRename,
+  driveTrash,
+  driveUpdateContent,
+  driveUploadInvoice,
+} from './drive';
 import { githubCodeSearch, githubFileGet, githubIssueSearch, githubRepoStats } from './github';
-import { gmailRead, gmailSearch, gmailSearchBoth } from './gmail';
+import { gmailGetAttachment, gmailRead, gmailSearch, gmailSearchBoth } from './gmail';
 import { memoryBulkSave, memoryDelete, memorySave, memoryView } from './memory';
 import { reminderCancel, reminderList, reminderSet } from './reminders';
+import { readTranscriptRange, searchTranscripts } from '../transcripts';
 import { sheetsAddTab, sheetsAppendExpense, sheetsCreate, sheetsRead, sheetsWrite } from './sheets';
 
 export interface ToolContext {
@@ -44,14 +56,32 @@ const TOOLS: ToolDefinition[] = [
   },
   {
     name: 'gmail_read',
-    description: "Full body of a Gmail message by id. Pass the same account you searched in.",
+    description:
+      "Full body of a Gmail message by id. Pass the same account you searched in. Returns up to 20k chars of body plus an `attachments` list ({filename, mime_type, size, attachment_id}). If body_truncated is true, call again with offset=next_offset to read the rest. Use gmail_get_attachment to read a listed attachment.",
     input_schema: {
       type: 'object',
       properties: {
         message_id: { type: 'string' },
         account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+        offset: { type: 'integer', description: 'Char offset into the body to start from (for paging long messages); defaults to 0', default: 0 },
       },
       required: ['message_id'],
+    },
+  },
+  {
+    name: 'gmail_get_attachment',
+    description:
+      "Read a Gmail attachment's content. Get message_id + attachment_id from gmail_read's `attachments` list. Text-based attachments (text/*, csv, json, xml, ics) are returned inline; binary types (PDF, images, office docs) return metadata only — for those, offer the Gmail link or to save to Drive.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        message_id: { type: 'string' },
+        attachment_id: { type: 'string', description: 'From gmail_read attachments[].attachment_id' },
+        filename: { type: 'string', description: 'From gmail_read attachments[].filename (helps type detection)' },
+        mime_type: { type: 'string', description: 'From gmail_read attachments[].mime_type' },
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+      },
+      required: ['message_id', 'attachment_id'],
     },
   },
   {
@@ -214,6 +244,114 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: 'doc_append',
+    description:
+      "Append text to the end of an existing Google Doc. Adds a leading newline so the new content starts on its own line.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        doc_id: { type: 'string' },
+        text: { type: 'string' },
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+      },
+      required: ['doc_id', 'text'],
+    },
+  },
+  {
+    name: 'doc_replace_body',
+    description:
+      "Replace the entire body of a Doc with new text. Destructive: prior content is gone. Use doc_find_replace for targeted edits.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        doc_id: { type: 'string' },
+        body: { type: 'string' },
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+      },
+      required: ['doc_id', 'body'],
+    },
+  },
+  {
+    name: 'doc_find_replace',
+    description:
+      "Run one or more find/replace edits on a Doc. Each edit reports how many occurrences it hit. match_case defaults to true.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        doc_id: { type: 'string' },
+        edits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              find: { type: 'string' },
+              replace: { type: 'string' },
+              match_case: { type: 'boolean', default: true },
+            },
+            required: ['find', 'replace'],
+          },
+        },
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+      },
+      required: ['doc_id', 'edits'],
+    },
+  },
+  {
+    name: 'drive_rename',
+    description: 'Rename a Drive file or folder.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        file_id: { type: 'string' },
+        new_name: { type: 'string' },
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+      },
+      required: ['file_id', 'new_name'],
+    },
+  },
+  {
+    name: 'drive_move',
+    description:
+      'Move a Drive file or folder into new_parent_id. Removes it from its current parent(s).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        file_id: { type: 'string' },
+        new_parent_id: { type: 'string' },
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+      },
+      required: ['file_id', 'new_parent_id'],
+    },
+  },
+  {
+    name: 'drive_trash',
+    description:
+      'Move a Drive file or folder to Trash (recoverable from the Drive UI for ~30 days). No permanent-delete tool is exposed to avoid accidents.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        file_id: { type: 'string' },
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+      },
+      required: ['file_id'],
+    },
+  },
+  {
+    name: 'drive_update_content',
+    description:
+      "Replace the bytes of an existing Drive file with new text content (text/plain, JSON, CSV, markdown). For Google-native types (Docs/Sheets/Slides) use doc_replace_body or sheets_write instead.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        file_id: { type: 'string' },
+        body: { type: 'string', description: 'New file contents' },
+        mime: { type: 'string', description: 'Content-Type; defaults to text/plain' },
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+      },
+      required: ['file_id', 'body'],
+    },
+  },
+  {
     name: 'github_code_search',
     description: 'GitHub code search. Defaults to env.GITHUB_DEFAULT_REPO.',
     input_schema: {
@@ -262,9 +400,20 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: 'calendar_list_calendars',
+    description:
+      "Discovery: list every calendar visible to this account, including shared ones (e.g. teammates who shared their calendar to your work account). Returns id (use as calendar_id), name, primary, access_role. Run this once when the operator asks about someone else's schedule and you don't yet know their calendar id.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+      },
+    },
+  },
+  {
     name: 'calendar_list_events',
     description:
-      "List events. account: 'work' (default) or 'personal'. Default range now→+7d. search filters by text/attendee. Show times in the operator's timezone.",
+      "List events. account: 'work' (default) or 'personal'. calendar_id: 'primary' (default) or a specific id from calendar_list_calendars (e.g. a teammate's shared calendar). Default range now→+7d. search filters by text/attendee. Show times in the operator's timezone.",
     input_schema: {
       type: 'object',
       properties: {
@@ -337,6 +486,34 @@ const TOOLS: ToolDefinition[] = [
       type: 'object',
       properties: { id: { type: 'string' } },
       required: ['id'],
+    },
+  },
+  {
+    name: 'history_search',
+    description:
+      "Keyword-search the operator's past chat history archive (beyond the in-context window). Returns matching turns with date, role, text snippet, and tool calls used. days_back defaults to 30. Use when the operator references something earlier than the recent window (\"what did we decide about X last week?\", \"the doc we created in May\").",
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Case-insensitive substring to match in message text or tool inputs' },
+        days_back: { type: 'integer', description: 'How far back to look in days (default 30, max 365)' },
+        max_results: { type: 'integer', description: 'Max matching turns to return (default 20, max 100)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'history_read_range',
+    description:
+      "Read the full chat archive between two dates (inclusive). Use when the operator asks about a specific day/week (\"what happened on the 3rd?\", \"replay tuesday\"). Date range capped at 60 days; turns capped at max_turns (default 100).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        from_date: { type: 'string', description: 'YYYY-MM-DD inclusive' },
+        to_date: { type: 'string', description: 'YYYY-MM-DD inclusive; defaults to from_date' },
+        max_turns: { type: 'integer', description: 'Max turns to return (default 100, max 500)' },
+      },
+      required: ['from_date'],
     },
   },
   {
@@ -433,6 +610,16 @@ export async function dispatchTool(
         ctx.env,
         String(input.message_id),
         (input.account as 'work' | 'personal') ?? 'work',
+        Number(input.offset ?? 0),
+      );
+    case 'gmail_get_attachment':
+      return gmailGetAttachment(
+        ctx.env,
+        String(input.message_id),
+        String(input.attachment_id),
+        (input.account as 'work' | 'personal') ?? 'work',
+        input.filename ? String(input.filename) : '',
+        input.mime_type ? String(input.mime_type) : '',
       );
     case 'sheets_append_expense':
       return sheetsAppendExpense(ctx.env, input as unknown as Parameters<typeof sheetsAppendExpense>[1]);
@@ -454,6 +641,20 @@ export async function dispatchTool(
       return sheetsAddTab(ctx.env, input as unknown as Parameters<typeof sheetsAddTab>[1]);
     case 'doc_create':
       return docCreate(ctx.env, input as unknown as Parameters<typeof docCreate>[1]);
+    case 'doc_append':
+      return docAppend(ctx.env, input as unknown as Parameters<typeof docAppend>[1]);
+    case 'doc_replace_body':
+      return docReplaceBody(ctx.env, input as unknown as Parameters<typeof docReplaceBody>[1]);
+    case 'doc_find_replace':
+      return docFindReplace(ctx.env, input as unknown as Parameters<typeof docFindReplace>[1]);
+    case 'drive_rename':
+      return driveRename(ctx.env, input as unknown as Parameters<typeof driveRename>[1]);
+    case 'drive_move':
+      return driveMove(ctx.env, input as unknown as Parameters<typeof driveMove>[1]);
+    case 'drive_trash':
+      return driveTrash(ctx.env, input as unknown as Parameters<typeof driveTrash>[1]);
+    case 'drive_update_content':
+      return driveUpdateContent(ctx.env, input as unknown as Parameters<typeof driveUpdateContent>[1]);
     case 'github_code_search':
       return githubCodeSearch(ctx.env, input as unknown as Parameters<typeof githubCodeSearch>[1]);
     case 'github_file_get':
@@ -462,6 +663,8 @@ export async function dispatchTool(
       return githubRepoStats(ctx.env, input as Parameters<typeof githubRepoStats>[1]);
     case 'github_issue_search':
       return githubIssueSearch(ctx.env, input as unknown as Parameters<typeof githubIssueSearch>[1]);
+    case 'calendar_list_calendars':
+      return calendarListCalendars(ctx.env, input as Parameters<typeof calendarListCalendars>[1]);
     case 'calendar_list_events':
       return calendarListEvents(ctx.env, input as Parameters<typeof calendarListEvents>[1]);
     case 'calendar_create_event':
@@ -478,6 +681,20 @@ export async function dispatchTool(
       return reminderList(ctx.env);
     case 'reminder_cancel':
       return reminderCancel(ctx.env, String(input.id));
+    case 'history_search':
+      return searchTranscripts(ctx.env, {
+        chat_id: ctx.chat_id,
+        query: String(input.query),
+        days_back: input.days_back as number | undefined,
+        max_results: input.max_results as number | undefined,
+      });
+    case 'history_read_range':
+      return readTranscriptRange(ctx.env, {
+        chat_id: ctx.chat_id,
+        from_date: String(input.from_date),
+        to_date: input.to_date as string | undefined,
+        max_turns: input.max_turns as number | undefined,
+      });
     case 'memory_view':
       return memoryView(ctx.env, String(input.name));
     case 'memory_save':

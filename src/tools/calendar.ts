@@ -1,6 +1,49 @@
 import type { Env } from '../index';
 import { googleFetch, type GoogleAccount } from './google-auth';
 
+interface ListCalendarsInput {
+  account?: GoogleAccount;
+}
+
+// Discovery: returns every calendar visible to this account, including
+// secondary calendars and ones shared by other people (e.g. Oren's/Shira's
+// calendars shared into the work account). The id field is what you pass as
+// calendar_id to calendar_list_events.
+export async function calendarListCalendars(env: Env, input: ListCalendarsInput): Promise<unknown> {
+  const account = input.account ?? 'work';
+  const url = new URL('https://www.googleapis.com/calendar/v3/users/me/calendarList');
+  url.searchParams.set('minAccessRole', 'reader');
+  url.searchParams.set('showHidden', 'true');
+
+  const res = await googleFetch(env, url.toString(), {}, account);
+  if (!res.ok) throw new Error(`Calendar list calendars (${account}) failed: ${res.status} ${await res.text()}`);
+
+  const data = (await res.json()) as {
+    items?: Array<{
+      id: string;
+      summary?: string;
+      summaryOverride?: string;
+      description?: string;
+      primary?: boolean;
+      accessRole?: string;
+      timeZone?: string;
+      backgroundColor?: string;
+    }>;
+  };
+
+  return {
+    account,
+    count: data.items?.length ?? 0,
+    calendars: (data.items ?? []).map((c) => ({
+      id: c.id,
+      name: c.summaryOverride ?? c.summary ?? '(no name)',
+      primary: Boolean(c.primary),
+      access_role: c.accessRole,
+      time_zone: c.timeZone,
+    })),
+  };
+}
+
 interface ListEventsInput {
   time_min?: string;
   time_max?: string;

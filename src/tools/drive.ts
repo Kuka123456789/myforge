@@ -182,6 +182,112 @@ export async function docCreate(env: Env, input: DocCreateInput): Promise<unknow
   return { ok: true, account, doc_id: data.id, title: data.name, link: data.webViewLink };
 }
 
+interface DriveRenameInput {
+  file_id: string;
+  new_name: string;
+  account?: GoogleAccount;
+}
+
+export async function driveRename(env: Env, input: DriveRenameInput): Promise<unknown> {
+  const account = input.account ?? 'work';
+  const res = await googleFetch(
+    env,
+    `https://www.googleapis.com/drive/v3/files/${input.file_id}?fields=id,name,webViewLink&supportsAllDrives=true`,
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: input.new_name }) },
+    account,
+  );
+  if (!res.ok) throw new Error(`Drive rename (${account}) failed: ${res.status} ${await res.text()}`);
+  const data = (await res.json()) as { id: string; name: string; webViewLink: string };
+  return { ok: true, account, file_id: data.id, name: data.name, link: data.webViewLink };
+}
+
+interface DriveMoveInput {
+  file_id: string;
+  new_parent_id: string;
+  account?: GoogleAccount;
+}
+
+// Moves a file to a new folder. We fetch current parents so we can pass
+// removeParents explicitly — Drive otherwise multi-parents the file (deprecated
+// but still possible on Shared Drives).
+export async function driveMove(env: Env, input: DriveMoveInput): Promise<unknown> {
+  const account = input.account ?? 'work';
+  const metaRes = await googleFetch(
+    env,
+    `https://www.googleapis.com/drive/v3/files/${input.file_id}?fields=parents&supportsAllDrives=true`,
+    {},
+    account,
+  );
+  if (!metaRes.ok) throw new Error(`Drive move (lookup, ${account}) failed: ${metaRes.status} ${await metaRes.text()}`);
+  const meta = (await metaRes.json()) as { parents?: string[] };
+  const removeParents = (meta.parents ?? []).join(',');
+
+  const url = new URL(`https://www.googleapis.com/drive/v3/files/${input.file_id}`);
+  url.searchParams.set('addParents', input.new_parent_id);
+  if (removeParents) url.searchParams.set('removeParents', removeParents);
+  url.searchParams.set('fields', 'id,name,parents,webViewLink');
+  url.searchParams.set('supportsAllDrives', 'true');
+
+  const res = await googleFetch(env, url.toString(), { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{}' }, account);
+  if (!res.ok) throw new Error(`Drive move (${account}) failed: ${res.status} ${await res.text()}`);
+  const data = (await res.json()) as { id: string; name: string; parents?: string[]; webViewLink: string };
+  return { ok: true, account, file_id: data.id, name: data.name, parents: data.parents ?? [], link: data.webViewLink };
+}
+
+interface DriveTrashInput {
+  file_id: string;
+  account?: GoogleAccount;
+}
+
+// Soft-delete: file goes to Trash and can be restored from the UI for ~30
+// days. We don't expose a permanent delete to avoid accidents.
+export async function driveTrash(env: Env, input: DriveTrashInput): Promise<unknown> {
+  const account = input.account ?? 'work';
+  const res = await googleFetch(
+    env,
+    `https://www.googleapis.com/drive/v3/files/${input.file_id}?fields=id,name,trashed&supportsAllDrives=true`,
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ trashed: true }) },
+    account,
+  );
+  if (!res.ok) throw new Error(`Drive trash (${account}) failed: ${res.status} ${await res.text()}`);
+  const data = (await res.json()) as { id: string; name: string; trashed: boolean };
+  return { ok: true, account, file_id: data.id, name: data.name, trashed: data.trashed };
+}
+
+interface DriveUpdateContentInput {
+  file_id: string;
+  body: string;
+  mime?: string;
+  account?: GoogleAccount;
+}
+
+// Replaces the bytes of an existing Drive file with new text content. Works
+// for text/* files (plain text, JSON, CSV, markdown). For Google-native
+// types (Docs/Sheets/Slides) use doc_replace_body / sheets_write instead —
+// this endpoint would corrupt them.
+export async function driveUpdateContent(env: Env, input: DriveUpdateContentInput): Promise<unknown> {
+  const account = input.account ?? 'work';
+  const mime = input.mime ?? 'text/plain';
+  const res = await googleFetch(
+    env,
+    `https://www.googleapis.com/upload/drive/v3/files/${input.file_id}?uploadType=media&supportsAllDrives=true&fields=id,name,mimeType,modifiedTime,size,webViewLink`,
+    { method: 'PATCH', headers: { 'content-type': mime }, body: input.body },
+    account,
+  );
+  if (!res.ok) throw new Error(`Drive update content (${account}) failed: ${res.status} ${await res.text()}`);
+  const data = (await res.json()) as { id: string; name: string; mimeType: string; modifiedTime: string; size?: string; webViewLink: string };
+  return {
+    ok: true,
+    account,
+    file_id: data.id,
+    name: data.name,
+    mime: data.mimeType,
+    modified: data.modifiedTime,
+    size_bytes: data.size ? Number(data.size) : null,
+    link: data.webViewLink,
+  };
+}
+
 function kindFromMime(mime: string): string {
   if (mime === 'application/vnd.google-apps.folder') return 'folder';
   if (mime === 'application/vnd.google-apps.document') return 'doc';
