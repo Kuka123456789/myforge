@@ -31,7 +31,7 @@ interface ClaudeResponse {
   id: string;
   role: 'assistant';
   content: ClaudeContentBlock[];
-  stop_reason: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence';
+  stop_reason: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence' | 'pause_turn';
 }
 
 export async function runAgent(args: RunArgs): Promise<RunResult> {
@@ -53,6 +53,16 @@ export async function runAgent(args: RunArgs): Promise<RunResult> {
 
     if (response.stop_reason === 'end_turn' || response.stop_reason === 'stop_sequence') {
       break;
+    }
+
+    // Server tools (code_execution / web_search) can pause a long-running call
+    // mid-execution: stop_reason is `pause_turn` and the assistant turn ends on a
+    // bare server_tool_use block whose result hasn't been generated yet. Re-send
+    // the conversation as-is so the model resumes. Breaking here instead would
+    // persist a dangling server_tool_use and Anthropic 400s on the next call
+    // ("... was found without a corresponding ..._tool_result block").
+    if (response.stop_reason === 'pause_turn') {
+      continue;
     }
 
     const toolUses = response.content.filter(

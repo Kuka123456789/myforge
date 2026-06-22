@@ -7,8 +7,8 @@ export async function loadHistory(kv: KVNamespace, chatId: number): Promise<Clau
   const raw = await kv.get(`${KEY_PREFIX}${chatId}`, 'json');
   if (!raw) return [];
   // Self-heal: prior versions of saveHistory could persist sliced histories
-  // with orphaned tool_result / web_search_tool_result blocks. Repair on load
-  // so existing broken entries don't keep failing.
+  // with orphaned tool_use / tool_result blocks. Repair on load so existing
+  // broken entries don't keep failing.
   return repairToolPairs(raw as ClaudeMessage[]);
 }
 
@@ -23,8 +23,7 @@ export async function saveHistory(
   // tokens on every turn. Also strip the per-turn preface (<today> + any legacy <memory-index>)
   // since those are re-injected on each new call from live state and the system prompt; keeping
   // them in history meant the memory index was being billed 10+ times per multi-turn message.
-  // Finally repair tool pairs — slicing can orphan tool_result / web_search_tool_result
-  // blocks from their preceding tool_use / server_tool_use producer (Anthropic 400s on that).
+  // Finally repair tool pairs — slicing can orphan a tool call from its result (Anthropic 400s).
   const trimmed = repairToolPairs(
     stripPreface(stripLargeAttachments(messages)).slice(-limit * 2),
   );
@@ -47,78 +46,77 @@ function stripLargeAttachments(messages: ClaudeMessage[]): ClaudeMessage[] {
   }));
 }
 
-// Drops content blocks whose preceding producer is missing from the window:
-//   - tool_result needs a prior tool_use with the same id
-//   - web_search_tool_result needs a prior server_tool_use with the same id
-// Also trims leading messages until the first kept message is a user message
-// that doesn't start with an orphan tool_result — Anthropic requires the
-// conversation to begin with user, and a tool_result block at index 0 has no
-// preceding producer to satisfy it.
+// Block-shape classifiers. The Anthropic API pairs every tool call with its result
+// by id, and this holds structurally across ALL tool families: client tools
+// (tool_use -> tool_result) and every server tool (server_tool_use ->
+// web_search_tool_result / code_execution_tool_result / bash_code_execution_tool_result / ...).
+// Rather than enumerate result-block type names (which grow every time a new server
+// tool ships), detect by shape: a PRODUCER is a tool_use/server_tool_use (carries
+// `id`); a CONSUMER is any block carrying a `tool_use_id`. New tools need no change.
+type AnyBlock = { type: string; id?: string; tool_use_id?: string };
+const isProducer = (b: AnyBlock): boolean =>
+  b.type === 'tool_use' || b.type === 'server_tool_use';
+const isConsumer = (b: AnyBlock): boolean => typeof b.tool_use_id === 'string';
+
+// Enforces the two dual invariants the API checks, so a sliced/truncated history
+// never 400s on a dangling tool call or result:
+//   forward  - every surviving CONSUMER references a producer seen earlier
+//              (drops an orphan *_tool_result whose producer was sliced off)
+//   backward - every surviving PRODUCER is referenced by some surviving consumer
+//              (drops an unanswered client tool_use cut off by MAX_TURNS, AND a
+//               server_tool_use whose result never came, e.g. a pause_turn)
+// Also trims leading messages until the first kept one is a user message with no
+// orphan consumer (the conversation must begin with user, and a consumer there has
+// no preceding producer to satisfy it).
 function repairToolPairs(messages: ClaudeMessage[]): ClaudeMessage[] {
-  // 1. Find the first viable start: a user message whose content has no
-  // tool_result blocks (they'd need a producer that we no longer have).
+  // 1. Find the first viable start: a user message with no consumer blocks.
   let start = 0;
   while (start < messages.length) {
     const m = messages[start];
-    const hasOrphanShaped = m.content.some((b) => {
-      const t = (b as { type: string }).type;
-      return t === 'tool_result' || t === 'web_search_tool_result';
-    });
-    if (m.role === 'user' && !hasOrphanShaped) break;
+    if (m.role === 'user' && !m.content.some((b) => isConsumer(b as AnyBlock))) break;
     start++;
   }
   if (start >= messages.length) return [];
 
-  // 2. Walk forward, building a producers set; drop any consumer block
-  // whose producer wasn't seen in the kept window. Drop messages that
-  // become empty as a result.
+  // 2. Forward: drop any consumer whose producer wasn't seen earlier in the
+  // window. Producers are added to `produced` in array order, so a server tool's
+  // same-message result (which follows its producer) resolves correctly.
   const produced = new Set<string>();
   const out: ClaudeMessage[] = [];
   for (let i = start; i < messages.length; i++) {
     const m = messages[i];
     const cleaned = m.content.filter((b) => {
-      const block = b as { type: string; id?: string; tool_use_id?: string };
-      if (block.type === 'tool_use' || block.type === 'server_tool_use') {
+      const block = b as AnyBlock;
+      if (isProducer(block)) {
         if (block.id) produced.add(block.id);
         return true;
       }
-      if (block.type === 'tool_result' || block.type === 'web_search_tool_result') {
-        return Boolean(block.tool_use_id && produced.has(block.tool_use_id));
-      }
+      if (isConsumer(block)) return produced.has(block.tool_use_id as string);
       return true;
     });
-    if (cleaned.length > 0) {
-      out.push({ ...m, content: cleaned });
-    }
+    if (cleaned.length > 0) out.push({ ...m, content: cleaned });
   }
 
-  // 3. Reverse direction: client-side tool_use blocks REQUIRE a following user
-  // message with matching tool_result. If MAX_TURNS hits mid-loop, the saved
-  // history ends on an assistant turn whose tool_use blocks were never answered.
-  // Anthropic 400s on the next call with "tool_use ids were found without
-  // tool_result blocks immediately after". For each assistant message, check
-  // the next message's tool_result ids; drop any tool_use blocks not answered.
-  for (let i = 0; i < out.length; i++) {
-    if (out[i].role !== 'assistant') continue;
-    const next = out[i + 1];
-    const answered = new Set<string>();
-    if (next && next.role === 'user') {
-      for (const b of next.content) {
-        const block = b as { type: string; tool_use_id?: string };
-        if (block.type === 'tool_result' && block.tool_use_id) {
-          answered.add(block.tool_use_id);
-        }
-      }
+  // 3. Backward: drop any producer not referenced by a surviving consumer. This
+  // is the dual of step 2 and covers both an unanswered client tool_use and an
+  // orphaned server_tool_use uniformly, with no per-tool special-casing.
+  const referenced = new Set<string>();
+  for (const m of out) {
+    for (const b of m.content) {
+      const block = b as AnyBlock;
+      if (isConsumer(block)) referenced.add(block.tool_use_id as string);
     }
+  }
+  for (let i = 0; i < out.length; i++) {
     out[i] = {
       ...out[i],
       content: out[i].content.filter((b) => {
-        const block = b as { type: string; id?: string };
-        if (block.type !== 'tool_use') return true;
-        return Boolean(block.id && answered.has(block.id));
+        const block = b as AnyBlock;
+        return isProducer(block) ? Boolean(block.id && referenced.has(block.id)) : true;
       }),
     };
   }
+
   return out.filter((m) => m.content.length > 0);
 }
 
