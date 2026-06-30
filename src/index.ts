@@ -54,6 +54,9 @@ export interface Env {
   EXPENSES_SHEET_ID: string;
   EXPENSES_IT_TAB: string;
   EXPENSES_TRAVEL_TAB: string;
+  // Personal Finance Ledger sheet (personal Google account). Optional — falls back
+  // to the built-in default ID in tools/finance.ts when unset.
+  FINANCE_SHEET_ID?: string;
   INVOICES_DRIVE_FOLDER_ID: string;
   TEST_SECRET: string;
   // Operator profile injected into the system prompt at runtime so the public

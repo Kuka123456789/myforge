@@ -19,7 +19,8 @@ import { gmailGetAttachment, gmailRead, gmailSearch, gmailSearchBoth } from './g
 import { memoryBulkSave, memoryDelete, memorySave, memoryView } from './memory';
 import { reminderCancel, reminderList, reminderSet } from './reminders';
 import { readTranscriptRange, searchTranscripts } from '../transcripts';
-import { sheetsAddTab, sheetsAppendExpense, sheetsCreate, sheetsRead, sheetsWrite } from './sheets';
+import { sheetsAddTab, sheetsAppendExpense, sheetsCreate, sheetsInfo, sheetsRead, sheetsWrite } from './sheets';
+import { financeLog } from './finance';
 
 export interface ToolContext {
   env: Env;
@@ -106,9 +107,46 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: 'finance_log',
+    description:
+      "Log ONE transaction to Daniel's PERSONAL Finance Ledger (a separate Google Sheet from the work expense sheet). Use this when Daniel says things like 'log 45 shekels coffee, cash' or 'I paid 200 cash to the trainer'. " +
+      'amount is SIGNED: negative = money out (spend), positive = money in (income) — a 45-shekel coffee is amount: -45. ' +
+      'Category and flow_type are auto-derived from the ledger Rules tab if you omit them; only pass category to override. ' +
+      'Default account is "Cash". IMPORTANT: use this for CASH and other manual items the bank statements cannot see (cash rent, the trainer, vaad bayit). Do NOT log card/bank charges here — those come in via the /finance-import statement flow, and logging them twice double-counts. ' +
+      'For non-ILS amounts you must also pass amount_ils (the shekel value). To READ/summarise the ledger, use sheets_read with account: "personal" against this sheet instead.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        merchant: { type: 'string', description: "Payee/description, e.g. 'Cofix', 'Alik (trainer)'" },
+        amount: { type: 'number', description: 'SIGNED amount in the native currency. Negative = spend, positive = income.' },
+        account: { type: 'string', description: 'Account name. Default "Cash". Others: "Hapoalim Checking", "Revolut Pro", etc.' },
+        date: { type: 'string', description: 'YYYY-MM-DD. Defaults to today (operator timezone).' },
+        currency: { type: 'string', description: 'ISO code, default "ILS".' },
+        amount_ils: { type: 'number', description: 'Signed ILS value. Required only when currency is not ILS.' },
+        category: { type: 'string', description: 'Override the auto-categorisation. Must be an existing category in the Categories tab.' },
+        flow_type: { type: 'string', enum: ['spend', 'income', 'transfer', 'capital', 'excluded'], description: 'Defaults from the matched rule, else "spend".' },
+        is_reimbursable: { type: 'boolean', description: 'TRUE if Greenbay reimburses it (AI/dev tools, hardware). Default false.' },
+        notes: { type: 'string' },
+      },
+      required: ['merchant', 'amount'],
+    },
+  },
+  {
+    name: 'sheets_info',
+    description:
+      "List a spreadsheet's tab (sheet) names plus its title, before reading or writing. Returns tabs: [{title, sheet_id, index, rows, cols}]. ALWAYS call this first when you don't already know the exact tab name — never guess 'Sheet1'/'Travel' or ask the operator for a tab name you can look up yourself. Defaults to the work expense sheet; pass sheet_id (+ account) for any other sheet.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        sheet_id: { type: 'string', description: 'Spreadsheet ID; defaults to work expense sheet' },
+        account: { type: 'string', enum: ['work', 'personal'], default: 'work' },
+      },
+    },
+  },
+  {
     name: 'sheets_read',
     description:
-      "Read a range from a Google Sheet. Defaults to the configured work expense sheet (env.EXPENSES_SHEET_ID). Pass sheet_id + account: 'personal' to read other sheets from the personal Drive.",
+      "Read a range from a Google Sheet. Defaults to the configured work expense sheet (env.EXPENSES_SHEET_ID). Pass sheet_id + account: 'personal' to read other sheets from the personal Drive. If you don't know the tab name, call sheets_info first.",
     input_schema: {
       type: 'object',
       properties: {
@@ -198,7 +236,7 @@ const TOOLS: ToolDefinition[] = [
   {
     name: 'sheets_write',
     description:
-      "Write a block of values to a sheet range. OVERWRITES existing cells (use sheets_append_expense for the canonical expense log). values is a 2D array of rows. range defaults to A1.",
+      "Write a block of values to a sheet range. OVERWRITES existing cells (use sheets_append_expense for the canonical expense log). values is a 2D array of rows. range defaults to A1. If unsure of the tab name, call sheets_info first.",
     input_schema: {
       type: 'object',
       properties: {
@@ -623,6 +661,10 @@ export async function dispatchTool(
       );
     case 'sheets_append_expense':
       return sheetsAppendExpense(ctx.env, input as unknown as Parameters<typeof sheetsAppendExpense>[1]);
+    case 'finance_log':
+      return financeLog(ctx.env, input as unknown as Parameters<typeof financeLog>[1]);
+    case 'sheets_info':
+      return sheetsInfo(ctx.env, input as unknown as Parameters<typeof sheetsInfo>[1]);
     case 'sheets_read':
       return sheetsRead(ctx.env, input as unknown as Parameters<typeof sheetsRead>[1]);
     case 'drive_upload_invoice':

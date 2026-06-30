@@ -19,6 +19,10 @@ EXPENSES_SHEET_ID=
 EXPENSES_IT_TAB=
 EXPENSES_TRAVEL_TAB=
 
+# Personal Finance Ledger (finance_log tool, PERSONAL Google account). Optional —
+# tools/finance.ts has a built-in default ID; set only to point at another sheet.
+FINANCE_SHEET_ID=
+
 # Drive folder ID where invoice PDFs/photos get uploaded.
 INVOICES_DRIVE_FOLDER_ID=
 
