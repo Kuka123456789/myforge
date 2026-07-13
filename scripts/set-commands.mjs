@@ -15,6 +15,7 @@ const commands = [
   { command: 'memories', description: 'Show what I remember about you' },
   { command: 'reminders', description: 'Show pending reminders' },
   { command: 'system', description: 'View / edit my system prompt' },
+  { command: 'auth', description: 'Re-link a Google account (work | personal)' },
   { command: 'help', description: 'What I can do' },
 ];
 

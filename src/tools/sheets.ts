@@ -4,6 +4,95 @@ import { googleFetch, type GoogleAccount } from './google-auth';
 // MyForge Log tab columns (1-indexed): A Date | B Vendor | C Category | D Type | E Amount
 // F Currency | G Paid By | H Drive link | I Notes | J Logged at
 
+interface TabInfo {
+  title: string;
+  sheet_id: number;
+  index: number;
+  rows: number | null;
+  cols: number | null;
+}
+
+// Fetch the spreadsheet's title + tab list. Used by sheets_info and to make
+// range failures self-healing (we surface the real tab names on a bad range).
+async function fetchSpreadsheetMeta(
+  env: Env,
+  sheetId: string,
+  account: GoogleAccount,
+): Promise<{ title: string; tabs: TabInfo[] }> {
+  const url =
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}` +
+    `?fields=properties.title,sheets.properties(sheetId,title,index,gridProperties)`;
+  const res = await googleFetch(env, url, {}, account);
+  if (!res.ok) throw new Error(`Sheets info (${account}) failed: ${res.status} ${await res.text()}`);
+  const data = (await res.json()) as {
+    properties?: { title?: string };
+    sheets?: Array<{
+      properties?: {
+        sheetId?: number;
+        title?: string;
+        index?: number;
+        gridProperties?: { rowCount?: number; columnCount?: number };
+      };
+    }>;
+  };
+  const tabs: TabInfo[] = (data.sheets ?? []).map((s) => ({
+    title: s.properties?.title ?? '',
+    sheet_id: s.properties?.sheetId ?? -1,
+    index: s.properties?.index ?? -1,
+    rows: s.properties?.gridProperties?.rowCount ?? null,
+    cols: s.properties?.gridProperties?.columnCount ?? null,
+  }));
+  return { title: data.properties?.title ?? '', tabs };
+}
+
+// A 400 from the values API with "Unable to parse range" almost always means a
+// wrong/guessed tab name. Re-throw with the actual tab names so the model can
+// self-correct instead of dead-ending and asking the operator.
+async function rangeError(
+  env: Env,
+  op: string,
+  sheetId: string,
+  account: GoogleAccount,
+  status: number,
+  body: string,
+): Promise<never> {
+  if (status === 400 && /unable to parse range|parse range/i.test(body)) {
+    try {
+      const meta = await fetchSpreadsheetMeta(env, sheetId, account);
+      const names = meta.tabs.map((t) => `"${t.title}"`).join(', ');
+      throw new Error(
+        `Sheets ${op} (${account}) failed: bad range. The tab name didn't match. ` +
+          `Available tabs in "${meta.title}": ${names || '(none)'}. ` +
+          `Retry with one of these exact tab names; do NOT ask the operator.`,
+      );
+    } catch (e) {
+      // If the meta lookup itself failed, fall through to the raw error below.
+      if (e instanceof Error && e.message.startsWith(`Sheets ${op}`)) throw e;
+    }
+  }
+  throw new Error(`Sheets ${op} (${account}) failed: ${status} ${body}`);
+}
+
+interface InfoInput {
+  sheet_id?: string; // defaults to the work expense sheet
+  account?: GoogleAccount;
+}
+
+export async function sheetsInfo(env: Env, input: InfoInput): Promise<unknown> {
+  const account = input.account ?? 'work';
+  const sheetId = input.sheet_id ?? env.EXPENSES_SHEET_ID;
+  if (!sheetId) throw new Error('sheet_id required when inspecting a non-default sheet');
+  const meta = await fetchSpreadsheetMeta(env, sheetId, account);
+  return {
+    ok: true,
+    account,
+    sheet_id: sheetId,
+    title: meta.title,
+    tabs: meta.tabs,
+    link: `https://docs.google.com/spreadsheets/d/${sheetId}/edit`,
+  };
+}
+
 interface AppendInput {
   bucket: 'IT' | 'Travel';
   date: string;
@@ -46,7 +135,7 @@ export async function sheetsAppendExpense(env: Env, input: AppendInput): Promise
     body: JSON.stringify({ values: [row] }),
   });
 
-  if (!res.ok) throw new Error(`Sheets append failed: ${res.status} ${await res.text()}`);
+  if (!res.ok) await rangeError(env, 'append', env.EXPENSES_SHEET_ID, 'work', res.status, await res.text());
 
   const data = (await res.json()) as { updates?: { updatedRange?: string } };
   return {
@@ -73,7 +162,7 @@ export async function sheetsRead(env: Env, input: ReadInput): Promise<unknown> {
   const range = input.range ? `${input.tab}!${input.range}` : `${input.tab}!A1:Z200`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`;
   const res = await googleFetch(env, url, {}, account);
-  if (!res.ok) throw new Error(`Sheets read (${account}) failed: ${res.status} ${await res.text()}`);
+  if (!res.ok) await rangeError(env, 'read', sheetId, account, res.status, await res.text());
   return res.json();
 }
 
@@ -151,7 +240,7 @@ export async function sheetsWrite(env: Env, input: WriteInput): Promise<unknown>
     { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ values: input.values }) },
     account,
   );
-  if (!res.ok) throw new Error(`Sheets write (${account}) failed: ${res.status} ${await res.text()}`);
+  if (!res.ok) await rangeError(env, 'write', input.sheet_id, account, res.status, await res.text());
   const data = (await res.json()) as { updatedRange?: string; updatedCells?: number };
   return {
     ok: true,
