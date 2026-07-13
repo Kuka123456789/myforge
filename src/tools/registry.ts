@@ -20,7 +20,7 @@ import { memoryBulkSave, memoryDelete, memorySave, memoryView } from './memory';
 import { reminderCancel, reminderList, reminderSet } from './reminders';
 import { readTranscriptRange, searchTranscripts } from '../transcripts';
 import { sheetsAddTab, sheetsAppendExpense, sheetsCreate, sheetsInfo, sheetsRead, sheetsWrite } from './sheets';
-import { financeLog } from './finance';
+import { financeFind, financeLog, financeUpdate } from './finance';
 
 export interface ToolContext {
   env: Env;
@@ -113,7 +113,7 @@ const TOOLS: ToolDefinition[] = [
       'amount is SIGNED: negative = money out (spend), positive = money in (income) — a 45-shekel coffee is amount: -45. ' +
       'Category and flow_type are auto-derived from the ledger Rules tab if you omit them; only pass category to override. ' +
       'Default account is "Cash". IMPORTANT: use this for CASH and other manual items the bank statements cannot see (cash rent, the trainer, vaad bayit). Do NOT log card/bank charges here — those come in via the /finance-import statement flow, and logging them twice double-counts. ' +
-      'For non-ILS amounts you must also pass amount_ils (the shekel value). To READ/summarise the ledger, use sheets_read with account: "personal" against this sheet instead.',
+      'For non-ILS amounts you must also pass amount_ils (the shekel value). To READ/summarise the ledger, use sheets_read with account: "personal" against this sheet. To CORRECT a row that is already in the ledger, use finance_find then finance_update — never append a second row to fix a wrong one.',
     input_schema: {
       type: 'object',
       properties: {
@@ -129,6 +129,52 @@ const TOOLS: ToolDefinition[] = [
         notes: { type: 'string' },
       },
       required: ['merchant', 'amount'],
+    },
+  },
+  {
+    name: 'finance_find',
+    description:
+      "Search Daniel's PERSONAL Finance Ledger and return matching rows WITH their sheet row numbers. This is the lookup step before finance_update: you need the row number to edit a row. " +
+      'All filters are optional and AND together (merchant/account are case-insensitive substrings). Returns the most recent matches first, 20 by default. ' +
+      'Use this whenever Daniel says a logged item is wrong ("that coffee was 45 not 54", "the Anthropic one should be reimbursable", "wrong date on those two"), and to check for an existing row before logging something that might already be there.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        merchant: { type: 'string', description: 'Case-insensitive substring of the merchant, e.g. "anthropic"' },
+        account: { type: 'string', description: 'Case-insensitive substring of the account, e.g. "cash"' },
+        category: { type: 'string', description: 'Exact category (case-insensitive)' },
+        flow_type: { type: 'string', enum: ['spend', 'income', 'transfer', 'capital', 'excluded'] },
+        date_from: { type: 'string', description: 'YYYY-MM-DD, inclusive' },
+        date_to: { type: 'string', description: 'YYYY-MM-DD, inclusive' },
+        amount_min: { type: 'number', description: 'On the SIGNED native amount (spends are negative)' },
+        amount_max: { type: 'number', description: 'On the SIGNED native amount' },
+        limit: { type: 'number', description: 'Max rows to return. Default 20.' },
+      },
+    },
+  },
+  {
+    name: 'finance_update',
+    description:
+      "Edit an EXISTING row in Daniel's PERSONAL Finance Ledger, in place. Get the row number from finance_find first — never guess it. Pass only the fields that change; everything else on the row is preserved. " +
+      'fx_rate and amount_ils are re-derived automatically when amount or currency change (for a currency switch you must pass amount_ils yourself). If you change merchant without passing category, the Rules tab re-categorises the row. ' +
+      'Use this to fix a wrong amount, date, account, category or note, or to flag is_reimbursable/is_refundable after the fact. Correcting a bad row this way is ALWAYS better than appending a compensating row.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        row: { type: 'number', description: 'Sheet row number from finance_find (>= 2; row 1 is the header)' },
+        merchant: { type: 'string' },
+        amount: { type: 'number', description: 'SIGNED native amount. Negative = spend, positive = income.' },
+        account: { type: 'string' },
+        date: { type: 'string', description: 'YYYY-MM-DD' },
+        currency: { type: 'string', description: 'ISO code. Pass amount_ils too when changing this.' },
+        amount_ils: { type: 'number', description: 'Signed ILS value.' },
+        category: { type: 'string', description: 'Must be an existing category in the Categories tab.' },
+        flow_type: { type: 'string', enum: ['spend', 'income', 'transfer', 'capital', 'excluded'] },
+        is_reimbursable: { type: 'boolean' },
+        is_refundable: { type: 'boolean' },
+        notes: { type: 'string' },
+      },
+      required: ['row'],
     },
   },
   {
@@ -663,6 +709,10 @@ export async function dispatchTool(
       return sheetsAppendExpense(ctx.env, input as unknown as Parameters<typeof sheetsAppendExpense>[1]);
     case 'finance_log':
       return financeLog(ctx.env, input as unknown as Parameters<typeof financeLog>[1]);
+    case 'finance_find':
+      return financeFind(ctx.env, input as unknown as Parameters<typeof financeFind>[1]);
+    case 'finance_update':
+      return financeUpdate(ctx.env, input as unknown as Parameters<typeof financeUpdate>[1]);
     case 'sheets_info':
       return sheetsInfo(ctx.env, input as unknown as Parameters<typeof sheetsInfo>[1]);
     case 'sheets_read':
